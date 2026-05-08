@@ -274,5 +274,11 @@
     "checking": "🔍 Checking for updates...",
     "error": "❌ Update error: {error}",
     "success": "✅ Code updated and dependencies installed.\nBot is restarting now..."
+  },
+  "voice": {
+    "transcribing": "Transcribing voice message locally...",
+    "you_said": "You said:",
+    "empty": "Could not understand the audio. Please speak more clearly.",
+    "error": "Transcription error: "
   }
 }

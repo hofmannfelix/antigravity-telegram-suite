@@ -37,11 +37,10 @@ Send messages, switch AI models, manage workspaces, take screenshots, and run mu
 | 🚀 **Turbo Mode** | Multi-agent orchestration: Claude plans → Gemini codes → Claude reviews → Gemini fixes |
 | 🔄 **Auto-Update** | Check for updates and self-update with one command |
 | 🌐 **Multi-Language** | 5 languages supported: English, Turkish, German, Spanish, French |
+| 🎙️ **Voice Control** | Send voice messages and have them transcribed locally |
 | ⌨️ **Typing Indicator** | Shows "typing..." in Telegram while the agent is working |
 | 🖥️ **Cross-Platform** | Works on Linux, macOS (Intel & Apple Silicon), and Windows |
 | 🔀 **Dual App Support** | Seamlessly switch between Antigravity IDE and Standalone Agent App |
-
----
 
 ## 🚀 Quick Start
 
@@ -157,10 +156,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 | Command | Description |
 |---|---|
 | *(any text)* | Send directly to the AI agent |
+| *(voice message)* | Transcribe locally and send to the AI agent |
 | `/latest` | Get the latest agent response as text |
 | `/screenshot` | Take a screenshot of the active agent window |
 | `/status` | Show system status (IDE, CDP connection, Bot) |
 | `/stop` | Stop the currently running agent |
+| `/start_ide` | Start the IDE remotely |
+| `/close` | Fully close the IDE |
 | `/new` | Open a new chat session |
 
 ### AI Model & Agent

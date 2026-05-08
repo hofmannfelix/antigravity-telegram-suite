@@ -274,5 +274,11 @@
     "checking": "🔍 Checking for updates...",
     "error": "❌ Update error: {error}",
     "success": "✅ Code updated and dependencies installed.\nBot is restarting now..."
+  },
+  "voice": {
+    "transcribing": "Sesli mesaj yerel olarak metne dönüştürülüyor...",
+    "you_said": "Dediğiniz:",
+    "empty": "Ses anlaşılamadı. Lütfen daha net konuşun.",
+    "error": "Dönüştürme hatası: "
   }
 }

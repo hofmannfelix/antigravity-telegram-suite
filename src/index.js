@@ -10,6 +10,7 @@ const { isAgentWorking, getFullLatestResponse, snapshotChatState, captureAgentSc
 const autoaccept = require('./autoaccept');
 const updater = require('./updater');
 const { runTurboOrchestration } = require('./turbo_orchestrator');
+const artifactPusher = require('./artifact_pusher');
 
 const TURBO_STATE_FILE = path.join(os.homedir(), '.gemini', 'antigravity', 'turbo_state.json');
 
@@ -1930,10 +1931,7 @@ bot.hears(/^🤖/i, async (ctx) => {
 });
 bot.hears(/^🧠/i, handleModel);
 
-bot.on('text', (ctx) => {
-    if (ctx.message.text.startsWith('/')) return;
-    const query = ctx.message.text;
-    
+async function handleQueryRequest(ctx, query) {
     let explicitTargetId = null;
     let explicitThreadName = null;
     if (ctx.message.reply_to_message) {
@@ -1945,49 +1943,134 @@ bot.on('text', (ctx) => {
         explicitTargetId = ctx.message.reply_to_message.reply_markup.inline_keyboard[0][0].callback_data.replace('focus_', '');
     }
     
-    (async () => {
-        try {
-            if (explicitThreadName) await switchAgentThread(CDP_PORT, explicitThreadName).catch(()=>{});
-            let targetId = explicitTargetId;
-            let text = "";
+    try {
+        if (explicitThreadName) await switchAgentThread(CDP_PORT, explicitThreadName).catch(()=>{});
+        let targetId = explicitTargetId;
+        let text = "";
 
-            if (isTurboMode) {
-                const turboTargetId = explicitTargetId || getPreferredTargetId() || null;
-                text = await runTurboOrchestration(query, CDP_PORT, turboTargetId, ctx, createProgressHandler, stripQueryFromResponse);
-                targetId = turboTargetId;
-            } else {
-                targetId = await sendViaCDP(query, CDP_PORT, explicitTargetId);
-                await ctx.reply(t('ask.sent'));
+        if (isTurboMode) {
+            const turboTargetId = explicitTargetId || getPreferredTargetId() || null;
+            text = await runTurboOrchestration(query, CDP_PORT, turboTargetId, ctx, createProgressHandler, stripQueryFromResponse);
+            targetId = turboTargetId;
+        } else {
+            targetId = await sendViaCDP(query, CDP_PORT, explicitTargetId);
+            await ctx.reply(t('ask.sent'));
 
-                // Wait briefly for message to render in DOM before anchoring state
-                await new Promise(r => setTimeout(r, 1500));
-                await snapshotChatState(CDP_PORT, targetId).catch(() => {});
-                
-                const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx), targetId);
-                if (isDone) {
-                    text = await getFullLatestResponse(CDP_PORT, targetId, explicitThreadName);
-                    text = stripQueryFromResponse(text, query);
-                } else {
-                    return await ctx.reply(t('ask.timeout'));
-                }
-            }
-
-            if (!text) text = t('ask.done_empty');
-            const header = await getChatHeader(targetId, t('ask.done'));
-            const buttons = await buildMainMenu();
+            // Wait briefly for message to render in DOM before anchoring state
+            await new Promise(r => setTimeout(r, 1500));
+            await snapshotChatState(CDP_PORT, targetId).catch(() => {});
             
-            const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
-            if (sentIds && sentIds.length > 0 && targetId) {
-                const activeInfo = await getActiveThreadInfo(CDP_PORT, targetId).catch(() => null);
-                const currentThreadName = activeInfo ? activeInfo.name : null;
-                sentIds.forEach(id => messageTargetMap.set(id, { targetId, threadName: currentThreadName }));
-                saveMessageTargetMap(messageTargetMap);
+            const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx), targetId);
+            if (isDone) {
+                text = await getFullLatestResponse(CDP_PORT, targetId, explicitThreadName);
+                text = stripQueryFromResponse(text, query);
+            } else {
+                return await ctx.reply(t('ask.timeout'));
             }
-        } catch(err) {
-            const errorMsg = err.message === 'no_chat_input' ? t('ask.no_chat_input') : err.message;
-            ctx.reply(t('ask.headless_error', { error: errorMsg })).catch(() => {});
         }
-    })();
+
+        if (!text) text = t('ask.done_empty');
+        const header = await getChatHeader(targetId, t('ask.done'));
+        const buttons = await buildMainMenu();
+        
+        const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
+        if (sentIds && sentIds.length > 0 && targetId) {
+            const activeInfo = await getActiveThreadInfo(CDP_PORT, targetId).catch(() => null);
+            const currentThreadName = activeInfo ? activeInfo.name : null;
+            sentIds.forEach(id => messageTargetMap.set(id, { targetId, threadName: currentThreadName }));
+            saveMessageTargetMap(messageTargetMap);
+        }
+    } catch(err) {
+        const errorMsg = err.message === 'no_chat_input' ? t('ask.no_chat_input') : err.message;
+        ctx.reply(t('ask.headless_error', { error: errorMsg })).catch(() => {});
+    }
+}
+
+bot.on('text', (ctx) => {
+    if (ctx.message.text.startsWith('/')) return;
+    const query = ctx.message.text;
+    handleQueryRequest(ctx, query);
+});
+
+// ===== VOICE MESSAGES =====
+
+const whisperNode = require('whisper-node');
+const whisper = (typeof whisperNode === 'function') ? whisperNode : (whisperNode.whisper || whisperNode.default || whisperNode);
+
+if (typeof whisper !== 'function') {
+    console.warn('[voice] Warning: whisper-node did not export a function. Voice messages will fail.');
+}
+
+const axios = require('axios');
+const { pipeline } = require('stream/promises');
+
+async function transcribeVoice(ctx) {
+    const fileId = ctx.message.voice.file_id;
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+    const tempOggPath = path.join(os.tmpdir(), `voice_${fileId}.ogg`);
+    const tempWavPath = path.join(os.tmpdir(), `voice_${fileId}.wav`);
+
+    try {
+        const statusMsg = await ctx.reply('🎤 ' + (t('voice.transcribing') || 'Voice message receiving...'));
+
+        const response = await axios({
+            method: 'get',
+            url: fileLink.href,
+            responseType: 'stream'
+        });
+        await pipeline(response.data, fs.createWriteStream(tempOggPath));
+
+        const oggStats = fs.statSync(tempOggPath);
+        if (oggStats.size === 0) throw new Error('Downloaded voice message is empty.');
+
+        await new Promise((resolve, reject) => {
+            exec(`ffmpeg -i "${tempOggPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}" -y`, (err, stdout, stderr) => {
+                if (err) {
+                    console.error('[voice] FFmpeg error:', stderr);
+                    reject(err);
+                }
+                else resolve();
+            });
+        });
+
+        if (!fs.existsSync(tempWavPath)) throw new Error('WAV conversion failed.');
+        
+        console.log('[voice] Starting whisper.cpp transcription...');
+        const whisperCppPath = path.join(__dirname, '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp', 'main');
+        const whisperModelPath = path.join(__dirname, '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp', 'models', 'ggml-base.bin');
+        const whisperLang = (process.env.LANGUAGE === 'tr') ? 'tr' : 'auto';
+
+        const transcript = await new Promise((resolve, reject) => {
+            const cmd = `"${whisperCppPath}" -m "${whisperModelPath}" -f "${tempWavPath}" -nt -l ${whisperLang}`;
+            exec(cmd, (err, stdout, stderr) => {
+                if (err) {
+                    console.error('[voice] whisper.cpp error:', stderr);
+                    reject(err);
+                } else resolve(stdout);
+            });
+        });
+
+        const text = transcript.split('\\n').map(line => line.trim()).filter(line => line && !line.startsWith('whisper_') && !line.startsWith('ggml_')).join(' ').trim();
+        
+        if (!text) {
+            await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ ' + (t('voice.empty') || 'Could not understand the audio.'));
+            return null;
+        }
+
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `📝 ${t('voice.you_said') || 'You said:'} "${text}"\\n\\n${t('ask.sent')}`);
+        return text;
+    } catch (err) {
+        console.error('Transcription error:', err);
+        ctx.reply('❌ ' + (t('voice.error') || 'Transcription error: ') + err.message);
+        return null;
+    } finally {
+        [tempOggPath, tempWavPath].forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    }
+}
+
+bot.on('voice', async (ctx) => {
+    const text = await transcribeVoice(ctx);
+    if (text) await handleQueryRequest(ctx, text);
 });
 
 // ===== PHOTO & DOCUMENT HANDLER =====
@@ -2123,7 +2206,14 @@ async function init() {
     }, 3000);
 
     // Start periodic update checker (notifies via Telegram when update is available)
-    updater.startUpdateChecker(bot, ALLOWED_CHAT_IDS);
+    if (process.env.DISABLE_UPDATE_CHECKER !== 'true') {
+        updater.startUpdateChecker(bot, ALLOWED_CHAT_IDS);
+    } else {
+        console.log('[updater] Update checker disabled by environment variable.');
+    }
+
+    // Start artifact pusher if enabled
+    artifactPusher.startArtifactPusher(bot, ALLOWED_CHAT_IDS);
 }
 
 init();

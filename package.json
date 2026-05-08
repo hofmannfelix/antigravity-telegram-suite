@@ -28,8 +28,11 @@
         "node": ">=18.0.0"
     },
     "dependencies": {
+        "axios": "^1.16.0",
         "chrome-remote-interface": "^0.34.0",
         "dotenv": "^17.4.2",
-        "telegraf": "^4.16.3"
+        "form-data": "^4.0.5",
+        "telegraf": "^4.16.3",
+        "whisper-node": "^1.1.1"
     }
 }
