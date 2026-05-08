@@ -920,6 +920,18 @@ bot.action(/wn_(.+)/, (ctx) => {
     ctx.answerCbQuery(t('window.selected_toast', { title: shortTitle }) || `Selected: ${shortTitle}`);
     ctx.reply(t('window.selected_msg', { title: selected.title }) || `✅ Now targeting: <b>${selected.title}</b>\n\nAll commands will route to this window.`, { parse_mode: 'HTML' });
     
+    // Auto-show latest agent response from the new window
+    (async () => {
+        try {
+            await new Promise(r => setTimeout(r, 800));
+            let text = await getFullLatestResponse(CDP_PORT);
+            if (text && !text.startsWith('[No previous')) {
+                text = await appendThreadFooter(text);
+                await sendLongMessage(ctx, text, '📋 Son Agent Yanıtı:');
+            }
+        } catch(_) {}
+    })();
+
     // Explicitly re-inject autoaccept into the selected window to ensure it tracks
     if (autoaccept.isEnabled) {
         autoaccept.enable(CDP_PORT).catch(() => {});

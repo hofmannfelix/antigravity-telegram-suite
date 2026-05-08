@@ -108,7 +108,7 @@ const CHAT_EXTRACT_EXPR = `
                 text = text.replace(/\\bSend\\b\\s*\\b(mic)?\\b/gi, '');
                 text = text.replace(/\\bmic\\b/gi, '');
                 text = text.replace(/Worked for \\d+s/gi, '');
-                text = text.replace(/\\b\\d{1,2}:\\d{2}(?:\\s*(?:AM|PM))?\\b/ig, '');
+                text = text.replace(/(?<!\\d)\\d{1,2}:\\d{2}(?:\\s*(?:AM|PM))?(?!\\d)/ig, '');
                 text = text.replace(/Thinking.../g, "").replace(/Gelişim App Dev/g, "");
 
                 text = text.replace(/^\\s*(Plan|Execute|Review|Task|Walkthrough|Implementation Plan)\\s*$/gm, '');
@@ -260,7 +260,47 @@ async function snapshotChatState(port) {
  * 3. Parse the last user message + model response from the log
  * 4. Fall back to DOM extraction only if the file doesn't exist
  */
+/**
+ * Extract latest agent response from the DOM of the currently targeted window.
+ * Used when a preferred window is set (so filesystem thread may differ) and
+ * also called directly on window switch for auto-latest.
+ */
+async function _domLatestExtraction(port) {
+    const candidates = await resolveTargets(port);
+    for (const target of candidates) {
+        try {
+            const client = await CDP({ target: target.webSocketDebuggerUrl });
+            const { Runtime } = client;
+            await Runtime.enable();
+            
+            const expr = CHAT_EXTRACT_EXPR.replace(
+                "extractedText = msgs.join('\\\\n\\\\n');",
+                "extractedText = msgs.slice(-2).join('\\\\n\\\\n');"
+            );
+            
+            const res = await Runtime.evaluate({
+                expression: expr,
+                returnByValue: true
+            });
+            await client.close();
+            
+            if (res.result?.value && res.result.value.trim() !== '') {
+                return res.result.value;
+            }
+        } catch(e) {}
+    }
+    return null;
+}
+
 async function getFullLatestResponse(port) {
+    // When a specific window is targeted via /window, the filesystem's
+    // "most recently modified thread" may belong to a different window.
+    // In that case, prefer DOM extraction from the selected window.
+    if (preferredTargetId) {
+        const domResult = await _domLatestExtraction(port);
+        if (domResult) return domResult;
+    }
+
     // --- Primary: file-system extraction from the active thread's log ---
     try {
         const activeId = await getActiveThreadId(port);
@@ -308,29 +348,10 @@ async function getFullLatestResponse(port) {
         console.log('[getFullLatestResponse] File-system extraction failed:', e.message);
     }
     
-    // --- Fallback: DOM extraction (may be stale if threads were switched) ---
-    const candidates = await resolveTargets(port);
-    for (const target of candidates) {
-        try {
-            const client = await CDP({ target: target.webSocketDebuggerUrl });
-            const { Runtime } = client;
-            await Runtime.enable();
-            
-            const expr = CHAT_EXTRACT_EXPR.replace(
-                "extractedText = msgs.join('\\n\\n');",
-                "extractedText = msgs.slice(-2).join('\\n\\n');"
-            );
-            
-            const res = await Runtime.evaluate({
-                expression: expr,
-                returnByValue: true
-            });
-            await client.close();
-            
-            if (res.result?.value && res.result.value.trim() !== '') {
-                return res.result.value;
-            }
-        } catch(e) {}
+    // --- Fallback: DOM extraction (when no preferred window or file-system failed) ---
+    if (!preferredTargetId) {
+        const domResult = await _domLatestExtraction(port);
+        if (domResult) return domResult;
     }
     
     // Fallback to cache if everything failed
@@ -508,9 +529,22 @@ async function waitForAgentResponse(port, timeoutMs = 450000, onProgress = null)
 
 async function sendViaCDP(text, port) {
     const candidates = await resolveTargets(port);
-    
-    // resolveTargets already sorts candidates properly based on activeWorkspaceName
-    const sortedCandidates = candidates;
+    let sortedCandidates = candidates;
+
+    // Prevent cross-workspace injection: if a specific workspace is targeted 
+    // (via /window or active detection), ONLY try targets in that workspace.
+    if (preferredTargetId) {
+        const pref = candidates.find(t => t.id === preferredTargetId);
+        if (pref && pref.title) {
+            const shortTitle = pref.title.substring(0, 15); // Match base workspace name
+            sortedCandidates = candidates.filter(t => t.id === preferredTargetId || (t.title && t.title.includes(shortTitle)));
+        } else {
+            sortedCandidates = candidates.filter(t => t.id === preferredTargetId);
+        }
+    } else if (activeWorkspaceName) {
+        sortedCandidates = candidates.filter(t => t.title && t.title.toLowerCase().includes(activeWorkspaceName.toLowerCase()));
+        if (sortedCandidates.length === 0) sortedCandidates = candidates; // Fallback if none match
+    }
 
     const errors = [];
     for (const target of sortedCandidates) {
@@ -522,19 +556,13 @@ async function sendViaCDP(text, port) {
 
             const focusResult = await withTimeout(Runtime.evaluate({
                 expression: `
+                    ${UI_LOCATORS_SCRIPT}
                     (async function() {
                         try {
                             const escapedText = ${JSON.stringify(text)};
                             
-                            // Find the input inside #antigravity (the main agent panel input box).
-                            // This is the primary active conversation input in the Manager target.
-                            const agPanel = document.querySelector('#antigravity [contenteditable="true"]');
-                            
-                            // Fallback: any contenteditable not in xterm
-                            const allEditors = [...document.querySelectorAll('[contenteditable="true"]')]
-                                .filter(el => !el.className.includes('xterm'));
-                            
-                            const editor = agPanel || allEditors.at(-1);
+                            // Use the robust centralized locator to find the actual chat input
+                            const editor = AG_UI.getChatInput();
                             
                             if (!editor) return { found: false, reason: "no_editor", editorCount: 0 };
 
@@ -837,6 +865,32 @@ async function switchAgentThread(port, threadName) {
                     });
                     await client2.close();
                 } catch(_) { /* popup may not appear for same-workspace threads */ }
+                
+                // Step 5: Wait for the new thread's chat input to become ready.
+                // Without this, the first message after switching gets lost because
+                // the editor hasn't loaded yet.
+                for (let waitAttempt = 0; waitAttempt < 6; waitAttempt++) {
+                    await new Promise(r => setTimeout(r, 500));
+                    try {
+                        const client3 = await CDP({ target: target.webSocketDebuggerUrl });
+                        const { Runtime: Runtime3 } = client3;
+                        await Runtime3.enable();
+                        const readyCheck = await Runtime3.evaluate({
+                            expression: `(() => {
+                                const editors = [...document.querySelectorAll('[contenteditable="true"]')]
+                                    .filter(el => !el.className.includes('xterm') && el.offsetParent !== null);
+                                return editors.length > 0;
+                            })()`,
+                            returnByValue: true
+                        });
+                        await client3.close();
+                        if (readyCheck.result?.value) {
+                            console.log(`[switchAgentThread] Chat input ready after ${(waitAttempt + 1) * 500}ms`);
+                            break;
+                        }
+                    } catch(_) {}
+                }
+                
                 return true;
             }
         } catch(e) { console.debug(`[switchAgentThread] error: ${e.message}`); }
