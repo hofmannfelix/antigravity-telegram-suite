@@ -64,7 +64,7 @@ const UI_LOCATORS_SCRIPT = `
          */
         getChatInput: () => {
             const editors = [...document.querySelectorAll('.interactive-input-editor textarea, #conversation textarea, #chat textarea, .chat-input textarea, [aria-label*="chat input" i] textarea, [contenteditable="true"]')]
-                .filter(el => !el.className.includes('xterm'));
+                .filter(el => !el.className.includes('xterm') && el.offsetParent !== null && window.getComputedStyle(el).display !== 'none');
             return editors.at(-1) || null;
         },
 

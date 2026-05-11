@@ -239,29 +239,26 @@ function launchIDE(workspace, port = 9333) {
             return reject(new Error('IDE_NOT_INSTALLED'));
         }
 
-        const executeCmd = () => {
+        const executeCmd = (isRunning) => {
             let cmd;
-            // --new-window ensures the IDE opens a fresh window for the workspace
-            // instead of restoring the previous session
-            // --disable-workspace-trust prevents the trust dialog from blocking automation
             const wsArg = workspace ? `--new-window --disable-workspace-trust "${workspace}"` : '';
 
-            console.log(`[platform] launchIDE: workspace=${workspace || 'none'}, port=${port}`);
+            // If the IDE is already running, passing the debugging port again can cause Electron to fail 
+            // binding the port and abort before sending the IPC message to open the new window.
+            const portArg = isRunning ? '' : `--remote-debugging-port=${port}`;
+
+            console.log(`[platform] launchIDE: workspace=${workspace || 'none'}, port=${port}, isRunning=${isRunning}`);
 
             switch (PLATFORM) {
                 case 'win32':
-                    cmd = `start "" "${binary}" --remote-debugging-port=${port} ${wsArg}`;
+                    cmd = `start "" "${binary}" ${portArg} ${wsArg}`;
                     break;
                 case 'darwin':
-                    // Use the CLI script which handles IPC to correctly open new windows
-                    // in existing instances, unlike the raw MacOS binary.
                     const macCli = `${binary}/Contents/Resources/app/bin/antigravity`;
-                    cmd = `nohup "${macCli}" --remote-debugging-port=${port} ${wsArg} > /dev/null 2>&1 &`;
+                    cmd = `nohup "${macCli}" ${portArg} ${wsArg} > /dev/null 2>&1 &`;
                     break;
                 default: // linux
-                    // Always use the binary directly with full args for reliable workspace switching.
-                    // The launcher script doesn't pass --disable-workspace-trust and can interfere.
-                    cmd = `nohup "${binary}" --remote-debugging-port=${port} ${wsArg} > /dev/null 2>&1 &`;
+                    cmd = `nohup "${binary}" ${portArg} ${wsArg} > /dev/null 2>&1 &`;
             }
 
             console.log(`[platform] launchIDE cmd: ${cmd}`);
@@ -284,10 +281,12 @@ function launchIDE(workspace, port = 9333) {
                 if (!running) {
                     clearWindowState();
                 }
-                executeCmd();
+                executeCmd(running);
             });
         } else {
-            executeCmd();
+            isIDERunning().then(running => {
+                executeCmd(running);
+            });
         }
     });
 }
