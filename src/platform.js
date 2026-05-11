@@ -258,7 +258,13 @@ function launchIDE(workspace, port = 9333) {
                     cmd = `nohup "${macCli}" ${portArg} ${wsArg} > /dev/null 2>&1 &`;
                     break;
                 default: // linux
-                    cmd = `nohup "${binary}" ${portArg} ${wsArg} > /dev/null 2>&1 &`;
+                    if (isRunning) {
+                        // Use CLI wrapper to correctly send IPC message to open new window
+                        cmd = `nohup /usr/bin/antigravity ${wsArg} > /dev/null 2>&1 &`;
+                    } else {
+                        // Use raw binary for first launch
+                        cmd = `nohup "${binary}" ${portArg} ${wsArg} > /dev/null 2>&1 &`;
+                    }
             }
 
             console.log(`[platform] launchIDE cmd: ${cmd}`);
