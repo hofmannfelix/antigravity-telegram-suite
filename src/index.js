@@ -1,5 +1,5 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -275,7 +275,7 @@ bot.command('close_window', async (ctx) => {
     }
 });
 
-bot.command('status', async (ctx) => {
+const handleStatus = async (ctx) => {
     let msg = t('status.title') + '\n';
     
     const ideCheck = await isIDERunning();
@@ -308,7 +308,8 @@ bot.command('status', async (ctx) => {
     msg += '\n<b>Auto-Accept:</b> ' + (autoaccept.isEnabled ? '✅ ON' : '❌ OFF') + '\n';
 
     ctx.reply(msg, { parse_mode: 'HTML' });
-});
+};
+bot.command('status', handleStatus);
 
 /**
  * Appends thread info and agent status footer to response text.
@@ -333,6 +334,26 @@ async function getChatHeader(targetId = null, fallback = '') {
     return fallback;
 }
 
+async function sendMainMenu(ctx, text = '🕹️ Kontrol Paneli:') {
+    let wsName = 'Bilinmiyor';
+    try {
+        const info = await getActiveThreadInfo(CDP_PORT);
+        if (info && info.workspace) wsName = info.workspace;
+    } catch(e) {}
+
+    let modelName = 'Model Seçilmedi';
+    try {
+        const m = await getCurrentModel(CDP_PORT);
+        if (m) modelName = m;
+    } catch(e) {}
+
+    const kb = Markup.keyboard([
+        [`📂 ${wsName}`, `🤖 ${modelName}`]
+    ]).resize();
+
+    return ctx.reply(text, kb);
+}
+
 bot.command('latest', async (ctx) => {
     try {
         let text = await getFullLatestResponse(CDP_PORT);
@@ -343,7 +364,7 @@ bot.command('latest', async (ctx) => {
     }
 });
 
-bot.command('screenshot', async (ctx) => {
+const handleScreenshot = async (ctx) => {
     try {
         ctx.reply(t('screenshot.taking'));
         const buffer = await captureFullIDEScreenshot(CDP_PORT);
@@ -351,7 +372,8 @@ bot.command('screenshot', async (ctx) => {
     } catch (err) {
         ctx.reply(t('screenshot.error', { error: err.message }));
     }
-});
+};
+bot.command('screenshot', handleScreenshot);
 
 bot.command('quota', async (ctx) => {
     try {
@@ -622,10 +644,15 @@ bot.hears(/^\/artifact_(\d+)$/, async (ctx) => {
     }
 });
 
-bot.command('model', async (ctx) => {
-    const parts = ctx.message.text.split(' ');
-    parts.shift();
-    const modelName = parts.join(' ').trim();
+const handleModel = async (ctx) => {
+    let modelName = '';
+    if (ctx.message && ctx.message.text) {
+        const parts = ctx.message.text.split(' ');
+        if (parts[0].startsWith('/')) parts.shift();
+        modelName = parts.join(' ').trim();
+        // Clear if it's from the button text
+        if (modelName.startsWith('🤖') || modelName.toLowerCase().startsWith('model:')) modelName = '';
+    }
     
     if (modelName) {
         try {
@@ -656,7 +683,8 @@ bot.command('model', async (ctx) => {
     ctx.reply(t('model.select_prompt'), {
         reply_markup: { inline_keyboard: buttons }
     });
-});
+};
+bot.command('model', handleModel);
 
 bot.action(/md_(.+)/, async (ctx) => {
     try {
@@ -664,7 +692,7 @@ bot.action(/md_(.+)/, async (ctx) => {
         ctx.answerCbQuery(modelName);
         ctx.reply(t('model.changing', { model: modelName }));
         const success = await selectModel(CDP_PORT, modelName);
-        if (success) ctx.reply(t('model.changed', { model: modelName }));
+        if (success) await sendMainMenu(ctx, t('model.changed', { model: modelName }));
         else ctx.reply(t('model.select_failed'));
     } catch(e) {
         ctx.answerCbQuery(t('model.error'));
@@ -818,7 +846,7 @@ function doLaunchWorkspace(ctx, workspace) {
                 }
             }
             if (cdpReady) {
-                ctx.reply(t('workspace.started'));
+                await sendMainMenu(ctx, t('workspace.started'));
                 // Auto-click Trust Workspace dialog if it appears
                 trustWorkspaceViaCDP(CDP_PORT, 10).then(trusted => {
                     if (trusted) {
@@ -843,10 +871,14 @@ function doLaunchWorkspace(ctx, workspace) {
     })();
 }
 
-bot.command('workspace', (ctx) => {
-    const parts = ctx.message.text.split(' ');
-    parts.shift();
-    const workspace = parts.join(' ').trim();
+const handleWorkspace = (ctx) => {
+    let workspace = '';
+    if (ctx.message && ctx.message.text) {
+        const parts = ctx.message.text.split(' ');
+        if (parts[0].startsWith('/')) parts.shift();
+        workspace = parts.join(' ').trim();
+        if (workspace.startsWith('📂') || workspace.toLowerCase().startsWith('workspace:')) workspace = '';
+    }
     
     if (!workspace) {
         const projectsDir = config.projectsDir;
@@ -865,7 +897,8 @@ bot.command('workspace', (ctx) => {
     const wsPath = workspace.startsWith('/') ? workspace : path.join(config.projectsDir, workspace);
     currentWorkspaceDir = wsPath;
     doLaunchWorkspace(ctx, wsPath);
-});
+};
+bot.command('workspace', handleWorkspace);
 
 bot.action(/ws_(.+)/, (ctx) => {
     const project = ctx.match[1];
@@ -1315,6 +1348,13 @@ bot.command('update', async (ctx) => {
 });
 
 // ===== TEXT MESSAGE HANDLER (Headless mode) =====
+
+bot.command('panel', async (ctx) => {
+    await sendMainMenu(ctx);
+});
+
+bot.hears(/^📂/i, handleWorkspace);
+bot.hears(/^🤖/i, handleModel);
 
 bot.on('text', (ctx) => {
     if (ctx.message.text.startsWith('/')) return;
