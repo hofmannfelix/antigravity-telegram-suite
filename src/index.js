@@ -12,7 +12,27 @@ const updater = require('./updater');
 
 let cachedAgentThreads = [];
 let cachedArtifacts = [];
-const messageTargetMap = new Map();
+
+const MAP_FILE_PATH = path.join(os.homedir(), '.gemini', 'antigravity', 'message_target_map.json');
+function loadMessageTargetMap() {
+    try {
+        if (fs.existsSync(MAP_FILE_PATH)) {
+            return new Map(JSON.parse(fs.readFileSync(MAP_FILE_PATH, 'utf-8')));
+        }
+    } catch (err) { console.error('Failed to load messageTargetMap:', err.message); }
+    return new Map();
+}
+function saveMessageTargetMap(map) {
+    try {
+        if (map.size > 2000) {
+            const trimmed = Array.from(map.entries()).slice(-2000);
+            map.clear();
+            trimmed.forEach(([k, v]) => map.set(k, v));
+        }
+        fs.writeFileSync(MAP_FILE_PATH, JSON.stringify(Array.from(map.entries())));
+    } catch (err) { console.error('Failed to save messageTargetMap:', err.message); }
+}
+const messageTargetMap = loadMessageTargetMap();
 
 // Load configured language
 const lang = process.env.LANGUAGE || 'en';
@@ -982,8 +1002,7 @@ bot.action(/focus_(.+)/, async (ctx) => {
     ctx.answerCbQuery(t('ask.focus_toast', { title: shortTitle }) || `Yanıtlanıyor: ${shortTitle}`);
     ctx.reply(t('ask.focus_success', { title: selected.title }) || `✅ <b>${selected.title}</b> ajanına kilitlenildi.\n✍️ Şimdi yazacağınız mesaj doğrudan bu ajana gidecek.`, { 
         parse_mode: 'HTML',
-        reply_parameters: { message_id: ctx.callbackQuery.message.message_id, allow_sending_without_reply: true },
-        reply_markup: { force_reply: true, input_field_placeholder: 'Ajan için mesajınızı yazın...' }
+        reply_parameters: { message_id: ctx.callbackQuery.message.message_id, allow_sending_without_reply: true }
     });
 });
 
@@ -1328,10 +1347,7 @@ bot.on('text', (ctx) => {
                 const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
                 if (sentIds && sentIds.length > 0 && targetId) {
                     sentIds.forEach(id => messageTargetMap.set(id, targetId));
-                    if (messageTargetMap.size > 2000) {
-                        const firstKey = messageTargetMap.keys().next().value;
-                        messageTargetMap.delete(firstKey);
-                    }
+                    saveMessageTargetMap(messageTargetMap);
                 }
             } else {
                 await ctx.reply(t('ask.timeout'));
@@ -1408,10 +1424,7 @@ bot.on(['photo', 'document'], (ctx) => {
                 const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
                 if (sentIds && sentIds.length > 0 && targetId) {
                     sentIds.forEach(id => messageTargetMap.set(id, targetId));
-                    if (messageTargetMap.size > 2000) {
-                        const firstKey = messageTargetMap.keys().next().value;
-                        messageTargetMap.delete(firstKey);
-                    }
+                    saveMessageTargetMap(messageTargetMap);
                 }
             } else {
                 await ctx.reply(t('ask.timeout'));
