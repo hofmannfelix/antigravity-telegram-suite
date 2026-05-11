@@ -85,7 +85,13 @@ async function sendLongMessage(ctx, text, prefix = '', buttons = null, replyToMs
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
                 const opts = { parse_mode: 'HTML' };
-                if (kbOpts && kbOpts.length > 0) opts.reply_markup = { inline_keyboard: kbOpts };
+                if (kbOpts) {
+                    if (Array.isArray(kbOpts)) {
+                        if (kbOpts.length > 0) opts.reply_markup = { inline_keyboard: kbOpts };
+                    } else if (kbOpts.reply_markup) {
+                        opts.reply_markup = kbOpts.reply_markup;
+                    }
+                }
                 if (threadReplyId) {
                     opts.reply_parameters = { message_id: threadReplyId, allow_sending_without_reply: true };
                 }
@@ -1383,7 +1389,19 @@ bot.on('text', (ctx) => {
                 text = stripQueryFromResponse(text, query);
                 if (!text) text = t('ask.done_empty');
                 const header = await getChatHeader(targetId, t('ask.done'));
-                const buttons = null;
+                
+                let wsName = 'Bilinmiyor';
+                let modelName = 'Model Seçilmedi';
+                try {
+                    const info = await getActiveThreadInfo(CDP_PORT, targetId);
+                    if (info && info.workspace) wsName = info.workspace;
+                    const m = await getCurrentModel(CDP_PORT);
+                    if (m) modelName = m;
+                } catch(e) {}
+                const buttons = Markup.keyboard([
+                    [`📂 ${wsName}`, `🤖 ${modelName}`]
+                ]).resize();
+                
                 const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
                 if (sentIds && sentIds.length > 0 && targetId) {
                     sentIds.forEach(id => messageTargetMap.set(id, targetId));
@@ -1460,7 +1478,19 @@ bot.on(['photo', 'document'], (ctx) => {
                 }
                 if (!text) text = t('ask.done_empty');
                 const header = await getChatHeader(targetId, t('ask.done'));
-                const buttons = null;
+                
+                let wsName = 'Bilinmiyor';
+                let modelName = 'Model Seçilmedi';
+                try {
+                    const info = await getActiveThreadInfo(CDP_PORT, targetId);
+                    if (info && info.workspace) wsName = info.workspace;
+                    const m = await getCurrentModel(CDP_PORT);
+                    if (m) modelName = m;
+                } catch(e) {}
+                const buttons = Markup.keyboard([
+                    [`📂 ${wsName}`, `🤖 ${modelName}`]
+                ]).resize();
+                
                 const sentIds = await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
                 if (sentIds && sentIds.length > 0 && targetId) {
                     sentIds.forEach(id => messageTargetMap.set(id, targetId));
