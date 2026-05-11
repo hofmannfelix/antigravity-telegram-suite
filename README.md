@@ -24,7 +24,7 @@ Send messages, switch AI models, manage workspaces, take screenshots — all fro
 | 🤖 **Model Switching** | Change AI models (Gemini, Claude) with inline buttons |
 | 📂 **File Explorer** | Browse, navigate, and download project files |
 | 🔄 **Workspace Management** | Switch between projects without touching the keyboard |
-| 💬 **Thread Switching** | List and switch between chat threads across workspaces |
+| 💬 **Multi-Agent Focus** | Reply to specific agents directly from Telegram, or lock focus to a single project window |
 | ⚡ **Auto-Accept** | Automatically click Run, Accept, Allow, Continue buttons |
 | 🔄 **Auto-Update** | Check for updates and self-update with one command |
 | 🌐 **Multi-Language** | English and Turkish UI (extensible) |

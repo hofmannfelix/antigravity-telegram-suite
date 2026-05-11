@@ -55,7 +55,10 @@
     "timeout": "⚠️ Agent hala düşünüyor veya zaman aşımına uğradı. /latest ile kontrol edebilirsiniz.",
     "send_error": "❌ Gönderme Hatası: {error}",
     "headless_error": "❌ Headless İletim Hatası: {error}",
-    "no_chat_input": "IDE'de sohbet kutusu bulunamadı. Lütfen Antigravity'de bir chat penceresi açık olduğundan emin olun."
+    "no_chat_input": "IDE'de sohbet kutusu bulunamadı. Lütfen Antigravity'de bir chat penceresi açık olduğundan emin olun.",
+    "reply_agent": "✍️ Bu Ajanı Yanıtla",
+    "focus_toast": "Yanıtlanıyor: {title}",
+    "focus_success": "✅ <b>{title}</b> ajanına kilitlenildi.\n✍️ Şimdi yazacağınız mesaj doğrudan bu ajana gidecek."
   },
   "stop": {
     "stopping": "🛑 Agent durduruluyor...",

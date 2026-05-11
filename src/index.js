@@ -54,17 +54,21 @@ function markdownToTelegramHtml(text) {
 }
 
 // Helper: Send long messages safely within Telegram's 4096 char limit
-async function sendLongMessage(ctx, text, prefix = '') {
+async function sendLongMessage(ctx, text, prefix = '', buttons = null, replyToMsgId = null) {
     const MAX_LEN = 3500;
     
     // Parse text to HTML and preserve prefix formatting
     const htmlText = prefix ? `<b>${prefix}</b>\n\n${markdownToTelegramHtml(text)}` : markdownToTelegramHtml(text);
     
-    async function replyWithRetry(content, retries = 3) {
+    async function replyWithRetry(content, kbOpts = null, retries = 3, threadReplyId = null) {
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                await ctx.reply(content, { parse_mode: 'HTML' });
-                return;
+                const opts = { parse_mode: 'HTML' };
+                if (kbOpts && kbOpts.length > 0) opts.reply_markup = { inline_keyboard: kbOpts };
+                if (threadReplyId) {
+                    opts.reply_parameters = { message_id: threadReplyId, allow_sending_without_reply: true };
+                }
+                return await ctx.reply(content, opts);
             } catch (err) {
                 console.error(`sendLongMessage attempt ${attempt}/${retries} failed:`, err.message);
                 if (attempt < retries && !err.message.includes("can't parse entities")) {
@@ -73,8 +77,7 @@ async function sendLongMessage(ctx, text, prefix = '') {
                     // Fallback to sending raw text if HTML parsing completely fails
                     try {
                         const plain = content.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-                        await ctx.reply(plain);
-                        return;
+                        return await ctx.reply(plain, threadReplyId ? { reply_parameters: { message_id: threadReplyId, allow_sending_without_reply: true } } : {});
                     } catch (fallbackErr) {
                         throw fallbackErr;
                     }
@@ -90,8 +93,10 @@ async function sendLongMessage(ctx, text, prefix = '') {
         let currentChunk = '';
         let inPre = false;
         let preLang = '';
+        let currentReplyId = replyToMsgId;
 
-        for (const line of lines) {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
             const preMatch = line.match(/<pre>(?:<code class="language-([^"]+)">)?/);
             if (preMatch) {
                 inPre = true;
@@ -105,13 +110,14 @@ async function sendLongMessage(ctx, text, prefix = '') {
                 if (inPre) {
                     currentChunk += preLang ? '</code></pre>' : '</pre>';
                 }
-                await replyWithRetry(currentChunk);
+                const sentMsg = await replyWithRetry(currentChunk, buttons, 3, currentReplyId);
+                if (sentMsg) currentReplyId = sentMsg.message_id;
                 currentChunk = inPre ? (preLang ? `<pre><code class="language-${preLang}">\n` : '<pre>\n') : '';
             }
             currentChunk += line + '\n';
         }
         if (currentChunk.trim().length > 0) {
-            await replyWithRetry(currentChunk);
+            await replyWithRetry(currentChunk, buttons, 3, currentReplyId);
         }
         console.log(`sendLongMessage: Sent successfully`);
     } catch (err) {
@@ -279,23 +285,31 @@ bot.command('status', async (ctx) => {
 /**
  * Appends thread info and agent status footer to response text.
  */
-async function appendThreadFooter(text) {
+async function getChatHeader(targetId = null, fallback = '') {
     try {
-        const activeInfo = await getActiveThreadInfo(CDP_PORT);
+        const activeInfo = await getActiveThreadInfo(CDP_PORT, targetId);
         if (activeInfo) {
-            const isWorking = await isAgentWorking(CDP_PORT);
-            const statusLine = isWorking ? 'Working...' : 'Idle';
-            text += '\n\n' + `📁 ${activeInfo.workspace || 'Unknown'}` + (activeInfo.name ? ` / ${activeInfo.name}` : '') + `\nAgent Status: ${statusLine}`;
+            const wsName = activeInfo.workspace || 'Workspace';
+            let thName = activeInfo.name || 'Agent';
+            if (thName.length > 35) {
+                const words = thName.split(' ');
+                if (words.length > 5) {
+                    thName = words.slice(0, 5).join(' ') + '...';
+                } else {
+                    thName = thName.substring(0, 35) + '...';
+                }
+            }
+            return `📁 ${wsName}\n🤖 ${thName}`;
         }
     } catch (_) {}
-    return text;
+    return fallback;
 }
 
 bot.command('latest', async (ctx) => {
     try {
         let text = await getFullLatestResponse(CDP_PORT);
-        text = await appendThreadFooter(text);
-        await sendLongMessage(ctx, text, t('latest.title'));
+        const header = await getChatHeader(null, t('latest.title'));
+        await sendLongMessage(ctx, text, header);
     } catch (err) {
         ctx.reply(t('latest.error', { error: err.message }));
     }
@@ -346,8 +360,8 @@ bot.command('ask', (ctx) => {
                 let text = await getFullLatestResponse(CDP_PORT);
                 text = stripQueryFromResponse(text, query);
                 if (!text) text = t('ask.done_empty');
-                text = await appendThreadFooter(text);
-                await sendLongMessage(ctx, text, t('ask.done'));
+                const header = await getChatHeader(null, t('ask.done'));
+                await sendLongMessage(ctx, text, header);
             } else {
                 await ctx.reply(t('ask.timeout'));
             }
@@ -466,9 +480,15 @@ bot.hears(/^\/agents_(\d+)$/, async (ctx) => {
     if (num > 0 && num <= cachedAgentThreads.length) {
         const thread = cachedAgentThreads[num - 1];
         ctx.reply(t('agents.switched', { name: thread.name }) || `✅ Switched to thread: ${thread.name}`, { parse_mode: 'HTML' });
-        const success = await switchAgentThread(CDP_PORT, thread.name);
-        if (!success) {
+        const targetId = await switchAgentThread(CDP_PORT, thread.name);
+        if (!targetId) {
             ctx.reply(t('agents.not_found') || '❌ Thread could not be selected.');
+        } else {
+            // Reset window preference and let it auto-detect the workspace
+            setPreferredWindow(null);
+            if (thread.workspace) {
+                setActiveWorkspace(thread.workspace);
+            }
         }
     } else {
         ctx.reply(t('agents.invalid_number') || '❌ Invalid thread number.');
@@ -930,8 +950,8 @@ bot.action(/wn_(.+)/, (ctx) => {
             await new Promise(r => setTimeout(r, 800));
             let text = await getFullLatestResponse(CDP_PORT);
             if (text && !text.startsWith('[No previous')) {
-                text = await appendThreadFooter(text);
-                await sendLongMessage(ctx, text, '📋 Son Agent Yanıtı:');
+                const header = await getChatHeader(null, '📋 Son Agent Yanıtı:');
+                await sendLongMessage(ctx, text, header);
             }
         } catch(_) {}
     })();
@@ -940,6 +960,23 @@ bot.action(/wn_(.+)/, (ctx) => {
     if (autoaccept.isEnabled) {
         autoaccept.enable(CDP_PORT).catch(() => {});
     }
+});
+
+bot.action(/focus_(.+)/, async (ctx) => {
+    const idPrefix = ctx.match[1];
+    const windows = await listWindows(CDP_PORT);
+    const selected = windows.find(w => w.id.startsWith(idPrefix));
+    if (!selected) {
+        return ctx.answerCbQuery('Ajan penceresi bulunamadı veya kapatılmış.');
+    }
+    setPreferredWindow(selected.id);
+    const shortTitle = selected.title.substring(0, 30);
+    ctx.answerCbQuery(t('ask.focus_toast', { title: shortTitle }) || `Yanıtlanıyor: ${shortTitle}`);
+    ctx.reply(t('ask.focus_success', { title: selected.title }) || `✅ <b>${selected.title}</b> ajanına kilitlenildi.\n✍️ Şimdi yazacağınız mesaj doğrudan bu ajana gidecek.`, { 
+        parse_mode: 'HTML',
+        reply_parameters: { message_id: ctx.callbackQuery.message.message_id, allow_sending_without_reply: true },
+        reply_markup: { force_reply: true, input_field_placeholder: 'Ajan için mesajınızı yazın...' }
+    });
 });
 
 // ===== FILE EXPLORER =====
@@ -1256,22 +1293,28 @@ bot.on('text', (ctx) => {
     if (ctx.message.text.startsWith('/')) return;
     const query = ctx.message.text;
     
+    let explicitTargetId = null;
+    if (ctx.message.reply_to_message?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('focus_')) {
+        explicitTargetId = ctx.message.reply_to_message.reply_markup.inline_keyboard[0][0].callback_data.replace('focus_', '');
+    }
+    
     (async () => {
         try {
-            await sendViaCDP(query, CDP_PORT);
+            const targetId = await sendViaCDP(query, CDP_PORT, explicitTargetId);
             await ctx.reply(t('ask.sent'));
 
             // Wait briefly for message to render in DOM before anchoring state
             await new Promise(r => setTimeout(r, 1500));
             await snapshotChatState(CDP_PORT).catch(() => {});
             
-            const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx));
+            const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx), targetId);
             if (isDone) {
-                let text = await getFullLatestResponse(CDP_PORT);
+                let text = await getFullLatestResponse(CDP_PORT, targetId);
                 text = stripQueryFromResponse(text, query);
                 if (!text) text = t('ask.done_empty');
-                text = await appendThreadFooter(text);
-                await sendLongMessage(ctx, text, t('ask.done'));
+                const header = await getChatHeader(targetId, t('ask.done'));
+                const buttons = targetId ? [[{ text: t('ask.reply_agent') || '✍️ Bu Ajanı Yanıtla', callback_data: `focus_${targetId.substring(0, 15)}` }]] : null;
+                await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
             } else {
                 await ctx.reply(t('ask.timeout'));
             }
@@ -1319,23 +1362,29 @@ bot.on(['photo', 'document'], (ctx) => {
             const caption = ctx.message.caption ? `\nUser's message: ${ctx.message.caption}` : "";
             const query = `[System: The user has uploaded an image or file. You MUST use your \`view_file\` tool to examine the file at this absolute path: ${dest} . Do not say you cannot see it. Use the tool!]${caption}`;
             
+            let explicitTargetId = null;
+            if (ctx.message.reply_to_message?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('focus_')) {
+                explicitTargetId = ctx.message.reply_to_message.reply_markup.inline_keyboard[0][0].callback_data.replace('focus_', '');
+            }
+            
             await ctx.reply(t('photo.downloaded'));
-            await sendViaCDP(query, CDP_PORT);
+            const targetId = await sendViaCDP(query, CDP_PORT, explicitTargetId);
 
             // Wait briefly for message to render in DOM before anchoring state
             await new Promise(r => setTimeout(r, 1500));
             await snapshotChatState(CDP_PORT).catch(() => {});
             
-            const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx));
+            const isDone = await waitForAgentResponse(CDP_PORT, 450000, createProgressHandler(ctx), targetId);
             if (isDone) {
-                let text = await getFullLatestResponse(CDP_PORT);
+                let text = await getFullLatestResponse(CDP_PORT, targetId);
                 text = stripQueryFromResponse(text, query);
                 if (caption) {
                     text = stripQueryFromResponse(text, caption);
                 }
                 if (!text) text = t('ask.done_empty');
-                text = await appendThreadFooter(text);
-                await sendLongMessage(ctx, text, t('ask.done'));
+                const header = await getChatHeader(targetId, t('ask.done'));
+                const buttons = targetId ? [[{ text: t('ask.reply_agent') || '✍️ Bu Ajanı Yanıtla', callback_data: `focus_${targetId.substring(0, 15)}` }]] : null;
+                await sendLongMessage(ctx, text, header, buttons, ctx.message.message_id);
             } else {
                 await ctx.reply(t('ask.timeout'));
             }

@@ -287,8 +287,11 @@ async function snapshotChatState(port) {
  * Used when a preferred window is set (so filesystem thread may differ) and
  * also called directly on window switch for auto-latest.
  */
-async function _domLatestExtraction(port) {
-    const candidates = await resolveTargets(port);
+async function _domLatestExtraction(port, specificTargetId = null) {
+    let candidates = await resolveTargets(port);
+    if (specificTargetId) {
+        candidates = candidates.filter(t => t.id === specificTargetId);
+    }
     for (const target of candidates) {
         try {
             const client = await CDP({ target: target.webSocketDebuggerUrl });
@@ -314,12 +317,13 @@ async function _domLatestExtraction(port) {
     return null;
 }
 
-async function getFullLatestResponse(port) {
+async function getFullLatestResponse(port, specificTargetId = null) {
     // When a specific window is targeted via /window, the filesystem's
     // "most recently modified thread" may belong to a different window.
     // In that case, prefer DOM extraction from the selected window.
-    if (preferredTargetId) {
-        const domResult = await _domLatestExtraction(port);
+    const targetIdToUse = specificTargetId || preferredTargetId;
+    if (targetIdToUse) {
+        const domResult = await _domLatestExtraction(port, targetIdToUse);
         if (domResult) return domResult;
     }
 
@@ -371,7 +375,7 @@ async function getFullLatestResponse(port) {
     }
     
     // --- Fallback: DOM extraction (when no preferred window or file-system failed) ---
-    if (!preferredTargetId) {
+    if (!targetIdToUse) {
         const domResult = await _domLatestExtraction(port);
         if (domResult) return domResult;
     }
@@ -457,7 +461,7 @@ async function captureAgentScreenshot(port) {
     throw new Error("Could not capture screenshot on any target");
 }
 
-async function waitForAgentResponse(port, timeoutMs = 450000, onProgress = null) {
+async function waitForAgentResponse(port, timeoutMs = 450000, onProgress = null, specificTargetId = null) {
     const startTime = Date.now();
     let consecutiveIdleCount = 0;
     let lastProgressTime = 0;
@@ -468,8 +472,11 @@ async function waitForAgentResponse(port, timeoutMs = 450000, onProgress = null)
         let candidates;
         try {
             const raw = await resolveTargets(port);
-            // resolveTargets already sorts by activeWorkspaceName or preferredTargetId
-            candidates = raw;
+            if (specificTargetId) {
+                candidates = raw.filter(t => t.id === specificTargetId);
+            } else {
+                candidates = raw;
+            }
         } catch(e) {
             await new Promise(r => setTimeout(r, 3000));
             continue;
@@ -549,13 +556,13 @@ async function waitForAgentResponse(port, timeoutMs = 450000, onProgress = null)
     return false;
 }
 
-async function sendViaCDP(text, port) {
+async function sendViaCDP(text, port, specificTargetId = null) {
     const candidates = await resolveTargets(port);
     let sortedCandidates = candidates;
 
-    // Prevent cross-workspace injection: if a specific workspace is targeted 
-    // (via /window or active detection), ONLY try targets in that workspace.
-    if (preferredTargetId) {
+    if (specificTargetId) {
+        sortedCandidates = candidates.filter(t => t.id && t.id.startsWith(specificTargetId));
+    } else if (preferredTargetId) {
         const pref = candidates.find(t => t.id === preferredTargetId);
         if (pref && pref.title) {
             const shortTitle = pref.title.substring(0, 15); // Match base workspace name
@@ -646,7 +653,7 @@ async function sendViaCDP(text, port) {
                 } catch(e) {}
                 await client.close();
                 console.log(`sendViaCDP: Successfully sent via ${val.method} on "${target.title?.substring(0, 40)}"`);
-                return;
+                return target.id;
             }
             
             if (val) errors.push(`${target.title?.substring(0, 25)}: ${val.reason || 'no_editor'}`);
@@ -655,7 +662,7 @@ async function sendViaCDP(text, port) {
             if (e.message.includes('Promise was collected')) {
                 console.log(`[sendViaCDP] Ignoring Promise was collected for ${target.title}, assuming success!`);
                 try { if (client) await client.close(); } catch(_) {}
-                return;
+                return target.id;
             }
             errors.push(`${target.title?.substring(0, 25)}: ${e.message}`);
             try { if (client) await client.close(); } catch(_) {}
@@ -913,19 +920,23 @@ async function switchAgentThread(port, threadName) {
                     } catch(_) {}
                 }
                 
-                return true;
+                return target.id;
             }
         } catch(e) { console.debug(`[switchAgentThread] error: ${e.message}`); }
     }
-    return false;
+    return null;
 }
 
-async function getActiveThreadInfo(port) {
+async function getActiveThreadInfo(port, specificTargetId = null) {
     let threadId = null;
-    let threadName = 'Unknown Thread';
-    let workspaceName = 'IDE';
+    let threadName = null;
+    let workspaceName = null;
 
-    // 1. Get ID from the file system (most reliable since UI changes frequently)
+    // 1. Get Thread ID via DOM fallback or preferred method
+    let candidates = await resolveTargets(port, false);
+    if (specificTargetId) {
+        candidates = candidates.filter(t => t.id === specificTargetId);
+    }
     try {
         const brainPath = path.join(os.homedir(), '.gemini', 'antigravity', 'brain');
         if (fs.existsSync(brainPath)) {
@@ -947,7 +958,7 @@ async function getActiveThreadInfo(port) {
     } catch(e) { console.debug(`[getActiveThreadInfo] fallback error: ${e.message}`); }
 
     // 2. Get Name and Workspace from the DOM
-    const candidates = await resolveTargets(port, false);
+    if (!specificTargetId) candidates = await resolveTargets(port, false);
     for (const target of candidates) {
         try {
             const client = await withTimeout(CDP({ target: target.webSocketDebuggerUrl }), 2000, "CDP timeout");
@@ -999,14 +1010,15 @@ async function getActiveThreadInfo(port) {
     return null;
 }
 
-async function getActiveThreadId(port) {
-    const info = await getActiveThreadInfo(port);
+async function getActiveThreadId(port, specificTargetId = null) {
+    const info = await getActiveThreadInfo(port, specificTargetId);
     return info ? info.id : null;
 }
-async function isAgentWorking(port) {
-    const raw = await resolveTargets(port, false);
-    // Manager has the active conversation — check it first
-    const candidates = raw;
+async function isAgentWorking(port, specificTargetId = null) {
+    let candidates = await resolveTargets(port, false);
+    if (specificTargetId) {
+        candidates = candidates.filter(t => t.id === specificTargetId);
+    }
     for (const target of candidates) {
         try {
             const client = await withTimeout(CDP({ target: target.webSocketDebuggerUrl }), 2000, "CDP timeout");
