@@ -265,13 +265,10 @@ function launchIDE(workspace, port = 9333) {
                 default: // linux
                     if (isRunning) {
                         // IDE is already running with CDP on the port.
-                        // Use the CLI wrapper which sends IPC to the existing instance.
-                        // Raw binary fails with "bind() Address already in use" on the debug port.
-                        // IMPORTANT: Run synchronously (no nohup/&) — the CLI wrapper is a
-                        // quick IPC call that must complete before the process exits.
-                        // Backgrounding it with & kills it before the IPC message is delivered.
-                        const folderArg = workspace ? `--new-window "${workspace}"` : '';
-                        cmd = `/usr/bin/antigravity ${folderArg}`;
+                        // Cannot pass --remote-debugging-port again (bind conflict).
+                        // Use the raw binary without port flag — it sends IPC to the
+                        // existing instance to open a new window.
+                        cmd = `"${binary}" ${wsArg}`;
                     } else {
                         // First launch — use raw binary with debugging port.
                         cmd = `nohup "${binary}" --remote-debugging-port=${port} ${wsArg} > /dev/null 2>&1 &`;
@@ -280,7 +277,19 @@ function launchIDE(workspace, port = 9333) {
 
             console.log(`[platform] launchIDE cmd: ${cmd}`);
 
-            exec(cmd, (err) => {
+            // Strip VSCODE_* env vars so the CLI wrapper doesn't get confused
+            // by stale IPC hooks inherited from the parent IDE process.
+            // PM2 inherits these when the bot is started from an IDE terminal.
+            const cleanEnv = { ...process.env };
+            delete cleanEnv.VSCODE_IPC_HOOK;
+            delete cleanEnv.VSCODE_IPC_HOOK_CLI;
+            delete cleanEnv.VSCODE_PID;
+            delete cleanEnv.VSCODE_CWD;
+            delete cleanEnv.VSCODE_NLS_CONFIG;
+            delete cleanEnv.VSCODE_CODE_CACHE_PATH;
+            delete cleanEnv.ELECTRON_RUN_AS_NODE;
+
+            exec(cmd, { env: cleanEnv }, (err) => {
                 if (err) {
                     console.error(`[platform] launchIDE exec error: ${err.message}`);
                     reject(err);
