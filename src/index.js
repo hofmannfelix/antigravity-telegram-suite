@@ -11,8 +11,26 @@ const autoaccept = require('./autoaccept');
 const updater = require('./updater');
 const { runTurboOrchestration } = require('./turbo_orchestrator');
 
-let isTurboMode = false;
-let turboPinnedMsgId = null;
+const TURBO_STATE_FILE = path.join(os.homedir(), '.gemini', 'antigravity', 'turbo_state.json');
+
+function loadTurboState() {
+    try {
+        if (fs.existsSync(TURBO_STATE_FILE)) {
+            return JSON.parse(fs.readFileSync(TURBO_STATE_FILE, 'utf-8'));
+        }
+    } catch (e) {}
+    return { active: false, pinnedMsgId: null };
+}
+
+function saveTurboState() {
+    try {
+        fs.writeFileSync(TURBO_STATE_FILE, JSON.stringify({ active: isTurboMode, pinnedMsgId: turboPinnedMsgId }));
+    } catch (e) {}
+}
+
+const initialTurboState = loadTurboState();
+let isTurboMode = initialTurboState.active;
+let turboPinnedMsgId = initialTurboState.pinnedMsgId;
 
 let cachedAgentThreads = [];
 let cachedArtifacts = [];
@@ -370,7 +388,7 @@ async function buildMainMenu() {
         [
             t('menu.btn_screenshot') || '📸 Ekran', 
             t('menu.btn_artifacts') || "📦 Artifact'ler", 
-            autoaccept.isEnabled ? (t('menu.btn_auto_on') || '⚡ Oto-Onay') : (t('menu.btn_auto_off') || '🔴 Oto-Onay'), 
+            isTurboMode ? '🚀 Turbo ✅' : '🚀 Turbo', 
             t('menu.btn_latest') || '💬 Son Yanıt'
         ]
     ]).resize();
@@ -1444,34 +1462,37 @@ bot.command('update', async (ctx) => {
 
 // ===== TURBO / COUNCIL MODE =====
 
-bot.command('turbo', async (ctx) => {
-    const parts = ctx.message.text.split(' ');
-    const subCommand = parts[1] ? parts[1].toLowerCase() : 'on';
-
-    if (subCommand === 'off') {
-        isTurboMode = false;
+async function handleTurbo(ctx) {
+    isTurboMode = !isTurboMode; // Toggle
+    
+    if (!isTurboMode) {
         if (turboPinnedMsgId) {
             try {
                 await ctx.telegram.unpinChatMessage(ctx.chat.id, turboPinnedMsgId);
-                turboPinnedMsgId = null;
             } catch (e) {}
+            turboPinnedMsgId = null;
         }
-        await ctx.reply('🛑 <b>Turbo Mod Kapatıldı.</b>\nNormal asistan moduna dönüldü.', { parse_mode: 'HTML' });
+        saveTurboState();
+        await sendMainMenu(ctx, '🛑 Turbo Mod Kapatıldı.\nNormal asistan moduna dönüldü.');
     } else {
-        isTurboMode = true;
         const msg = await ctx.reply(
             '⚡ <b>TURBO MOD AKTİF</b> ⚡\n\n' +
-            '⚠️ <b>Dikkat:</b> Bu modda gönderdiğiniz talepler Claude ve Gemini tarafından sırayla (Planlama -> Kodlama) ' +
+            '⚠️ <b>Dikkat:</b> Bu modda gönderdiğiniz talepler Claude ve Gemini tarafından sırayla (Planlama -> Kodlama -> İnceleme) ' +
             'işlenecektir. Kodlar kendi aralarında düzenlenip inceleneceği için <b>daha fazla token harcanır.</b>\n\n' +
-            'Bu modu kapatmak için <code>/turbo off</code> yazabilirsiniz.', 
+            'Bu modu kapatmak için tekrar <code>/turbo</code> yazabilir veya menüdeki butona tıklayabilirsiniz.', 
             { parse_mode: 'HTML' }
         );
         turboPinnedMsgId = msg.message_id;
         try {
             await ctx.telegram.pinChatMessage(ctx.chat.id, turboPinnedMsgId);
         } catch (e) {}
+        saveTurboState();
+        await sendMainMenu(ctx, '🚀 Turbo Mod devrede!');
     }
-});
+}
+
+bot.command('turbo', handleTurbo);
+bot.hears(/^🚀/i, handleTurbo);
 
 // ===== TEXT MESSAGE HANDLER (Headless mode) =====
 
