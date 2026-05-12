@@ -128,7 +128,12 @@
     "version_desc": "Mevcut sürümü gösterir",
     "menu_desc": "Komut menüsünü güncelle",
     "window_desc": "IDE penceresi seç",
-    "restart_desc": "Botu yeniden başlatır"
+    "restart_desc": "Botu yeniden başlatır",
+    "btn_screenshot": "📸 Ekran",
+    "btn_artifacts": "📦 Artifact'ler",
+    "btn_auto_on": "⚡ Oto-Onay",
+    "btn_auto_off": "🔴 Oto-Onay",
+    "btn_latest": "💬 Son Yanıt"
   },
   "photo": {
     "downloaded": "✅ Dosya indirildi ve ajana yönlendiriliyor...",

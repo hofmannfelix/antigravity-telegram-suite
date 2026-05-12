@@ -124,7 +124,13 @@
         "close_window_desc": "Fermer la fenêtre actuelle",
         "agents_desc": "Lister et basculer entre les fils récents",
         "artifacts_desc": "Lister les artefacts du fil actuel",
-        "window_desc": "Sélectionner une fenêtre IDE"
+        "window_desc": "Sélectionner une fenêtre IDE",
+        "restart_desc": "Redémarrer le bot",
+        "btn_screenshot": "📸 Écran",
+        "btn_artifacts": "📦 Artefacts",
+        "btn_auto_on": "⚡ Auto",
+        "btn_auto_off": "🔴 Auto",
+        "btn_latest": "💬 Réponse"
     },
     "photo": {
         "downloaded": "✅ Fichier téléchargé et transféré...",

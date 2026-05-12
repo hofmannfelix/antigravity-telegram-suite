@@ -123,6 +123,55 @@ const CHAT_EXTRACT_EXPR = `
                 return text.trim();
             }
 
+            function nodeToMd(node) {
+                if (node.nodeType === 3) return node.textContent;
+                if (node.nodeType !== 1) return '';
+                
+                let tag = node.tagName.toLowerCase();
+                if (node.classList && node.classList.contains('code-block')) {
+                    let lines = Array.from(node.querySelectorAll('.code-line'));
+                    let code = lines.map(l => l.textContent.replace(/\\u00a0/g, ' ')).join('\\n');
+                    return '\\n\`\`\`\\n' + code + '\\n\`\`\`\\n';
+                }
+                if (tag === 'pre') {
+                    let codeNode = node.querySelector('code');
+                    let lang = '';
+                    if (codeNode) {
+                        let match = codeNode.className.match(/language-([a-z0-9]+)/i);
+                        if (match) lang = match[1];
+                        return '\\n\`\`\`' + lang + '\\n' + codeNode.textContent + '\\n\`\`\`\\n';
+                    }
+                    return '\\n\`\`\`\\n' + node.textContent + '\\n\`\`\`\\n';
+                }
+                if (tag === 'table') {
+                    let md = '\\n\`\`\`text\\n';
+                    let rows = Array.from(node.querySelectorAll('tr'));
+                    rows.forEach((row, i) => {
+                        let cells = Array.from(row.querySelectorAll('td, th')).map(c => c.textContent.trim().replace(/\\|/g, '\\\\|'));
+                        md += '| ' + cells.join(' | ') + ' |\\n';
+                        if (i === 0 && row.querySelector('th')) {
+                            md += '|' + cells.map(() => '---').join('|') + '|\\n';
+                        }
+                    });
+                    return md + '\`\`\`\\n';
+                }
+                
+                let md = '';
+                for (let child of node.childNodes) {
+                    md += nodeToMd(child);
+                }
+                
+                if (tag === 'strong' || tag === 'b') return '**' + md.trim() + '** ';
+                if (tag === 'em' || tag === 'i') return '_' + md.trim() + '_ ';
+                if (tag === 'code') return '\`' + md.trim() + '\`';
+                if (tag === 'a') return '[' + md.trim() + '](' + node.href + ')';
+                if (tag === 'p' || tag === 'div') return md + '\\n';
+                if (tag === 'li') return '- ' + md + '\\n';
+                if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4') return '\\n### ' + md.trim() + '\\n';
+                
+                return md;
+            }
+
             if (container) {
                 const list = container.querySelector('.relative.flex.flex-col.gap-y-3.px-4, .monaco-list-rows');
                 if (list) {
@@ -131,12 +180,12 @@ const CHAT_EXTRACT_EXPR = `
                         let isUser = !!child.querySelector('.bg-input');
                         let clone = child.cloneNode(true);
                         
-                        Array.from(clone.querySelectorAll('style, .material-icons, [class*="icon"]')).forEach(el => el.remove());
+                        Array.from(clone.querySelectorAll('style, .material-icons, .material-symbols-outlined, .material-symbols-rounded, .google-symbols, .codicon, [class*="icon"]')).forEach(el => el.remove());
                         
                         // Use centralized logic to remove Thought blocks
                         AG_UI.removeThoughtBlocks(clone);
                         
-                        Array.from(clone.querySelectorAll('button')).forEach(el => el.remove());
+                        Array.from(clone.querySelectorAll('button, [role="button"]')).forEach(el => el.remove());
                         
                         if (isUser) {
                             const userInput = clone.querySelector('.bg-input');
@@ -146,14 +195,15 @@ const CHAT_EXTRACT_EXPR = `
                             uText = cleanText(uText);
                             if (uText) msgs.push("👤 User:\\n" + uText);
                             
-                            let aText = cleanText(clone.innerText);
+                            let aText = cleanText(nodeToMd(clone));
                             if (aText) msgs.push("🤖 Agent:\\n" + aText);
                         } else {
-                            let aText = cleanText(clone.innerText);
+                            let aText = cleanText(nodeToMd(clone));
                             if (aText) msgs.push("🤖 Agent:\\n" + aText);
                         }
                     }
-                    extractedText = msgs.join('\\n\\n');
+                    // Clean up language names left behind by code block headers
+                    extractedText = msgs.join('\\n\\n').replace(/^(javascript|python|html|css|bash|json|markdown)\\n/gm, '');
                 } else {
                     extractedText = cleanText(container.innerText || container.textContent || "");
                 }
@@ -318,18 +368,11 @@ async function _domLatestExtraction(port, specificTargetId = null) {
 }
 
 async function getFullLatestResponse(port, specificTargetId = null) {
-    // When a specific window is targeted via /window, the filesystem's
-    // "most recently modified thread" may belong to a different window.
-    // In that case, prefer DOM extraction from the selected window.
     const targetIdToUse = specificTargetId || preferredTargetId;
-    if (targetIdToUse) {
-        const domResult = await _domLatestExtraction(port, targetIdToUse);
-        if (domResult) return domResult;
-    }
-
+    
     // --- Primary: file-system extraction from the active thread's log ---
     try {
-        const activeId = await getActiveThreadId(port);
+        const activeId = targetIdToUse || await getActiveThreadId(port);
         if (activeId) {
             const logPath = path.join(os.homedir(), '.gemini', 'antigravity', 'brain', activeId, '.system_generated', 'logs', 'overview.txt');
             if (fs.existsSync(logPath)) {
@@ -375,10 +418,8 @@ async function getFullLatestResponse(port, specificTargetId = null) {
     }
     
     // --- Fallback: DOM extraction (when no preferred window or file-system failed) ---
-    if (!targetIdToUse) {
-        const domResult = await _domLatestExtraction(port);
-        if (domResult) return domResult;
-    }
+    const domResult = await _domLatestExtraction(port, targetIdToUse);
+    if (domResult) return domResult;
     
     // Fallback to cache if everything failed
     if (globalLastValidResponse) {

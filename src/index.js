@@ -340,27 +340,54 @@ async function getChatHeader(targetId = null, fallback = '') {
     return fallback;
 }
 
-async function sendMainMenu(ctx, text = '🕹️ Kontrol Paneli:') {
-    let wsName = 'Bilinmiyor';
+async function buildMainMenu() {
+    let wsName = 'Projects';
     try {
         const info = await getActiveThreadInfo(CDP_PORT);
-        if (info && info.workspace) wsName = info.workspace;
-    } catch(e) {}
+        if (info && info.workspace) {
+            wsName = info.workspace.split('/').pop() || info.workspace;
+        } else if (typeof currentWorkspaceDir !== 'undefined' && currentWorkspaceDir && currentWorkspaceDir !== config.projectsDir) {
+            wsName = require('path').basename(currentWorkspaceDir);
+        }
+    } catch(e) {
+        if (typeof currentWorkspaceDir !== 'undefined' && currentWorkspaceDir && currentWorkspaceDir !== config.projectsDir) {
+            wsName = require('path').basename(currentWorkspaceDir);
+        }
+    }
 
-    let modelName = 'Model Seçilmedi';
+    let modelName = t('menu.model_not_selected') || 'Model Seçilmedi';
     try {
         const m = await getCurrentModel(CDP_PORT);
         if (m) modelName = m;
     } catch(e) {}
 
-    const kb = Markup.keyboard([
-        [`📂 ${wsName}`, `🤖 ${modelName}`]
+    return Markup.keyboard([
+        [`📂 ${wsName}`, `🤖 ${modelName}`],
+        [
+            t('menu.btn_screenshot') || '📸 Ekran', 
+            t('menu.btn_artifacts') || "📦 Artifact'ler", 
+            autoaccept.isEnabled ? (t('menu.btn_auto_on') || '⚡ Oto-Onay') : (t('menu.btn_auto_off') || '🔴 Oto-Onay'), 
+            t('menu.btn_latest') || '💬 Son Yanıt'
+        ]
     ]).resize();
+}
 
+async function sendMainMenu(ctx, text = '🕹️ Kontrol Paneli:') {
+    const kb = await buildMainMenu();
     return ctx.reply(text, kb);
 }
 
-bot.command('latest', async (ctx) => {
+async function pushMainMenuToUser(text = '🚀 Antigravity Bot güncellendi / yeniden başlatıldı!') {
+    if (!ALLOWED_CHAT_ID || process.env.SETUP_MODE === 'true') return;
+    const kb = await buildMainMenu();
+    return bot.telegram.sendMessage(ALLOWED_CHAT_ID, text, kb).catch(() => {});
+}
+
+bot.command('start', async (ctx) => {
+    await sendMainMenu(ctx, '👋 Hoşgeldin! Panelin hazır:');
+});
+
+const handleLatest = async (ctx) => {
     try {
         let text = await getFullLatestResponse(CDP_PORT);
         const header = await getChatHeader(null, t('latest.title'));
@@ -368,7 +395,10 @@ bot.command('latest', async (ctx) => {
     } catch (err) {
         ctx.reply(t('latest.error', { error: err.message }));
     }
-});
+};
+
+bot.command('latest', handleLatest);
+bot.hears(/^💬/i, handleLatest);
 
 const handleScreenshot = async (ctx) => {
     try {
@@ -380,6 +410,7 @@ const handleScreenshot = async (ctx) => {
     }
 };
 bot.command('screenshot', handleScreenshot);
+bot.hears(/^📸/i, handleScreenshot);
 
 bot.command('quota', async (ctx) => {
     try {
@@ -551,7 +582,7 @@ bot.hears(/^\/agents_(\d+)$/, async (ctx) => {
     }
 });
 
-bot.command('artifacts', async (ctx) => {
+const handleArtifacts = async (ctx) => {
     try {
         const activeId = await getActiveThreadId(CDP_PORT);
         if (!activeId) {
@@ -622,7 +653,10 @@ bot.command('artifacts', async (ctx) => {
     } catch (e) {
         ctx.reply((t('artifacts.error') || '❌ Error reading artifact: ') + e.message);
     }
-});
+};
+
+bot.command('artifacts', handleArtifacts);
+bot.hears(/^📦/i, handleArtifacts);
 
 bot.hears(/^\/artifact_(\d+)$/, async (ctx) => {
     const num = parseInt(ctx.match[1], 10);
@@ -707,8 +741,9 @@ bot.action(/md_(.+)/, async (ctx) => {
 
 // ===== AUTO-ACCEPT =====
 
-bot.command('autoaccept', async (ctx) => {
-    const parts = ctx.message.text.split(' ');
+const handleAutoAccept = async (ctx) => {
+    const text = ctx.message.text || '';
+    const parts = text.split(' ');
     parts.shift();
     const subCommand = parts.join(' ').trim().toLowerCase();
 
@@ -717,16 +752,23 @@ bot.command('autoaccept', async (ctx) => {
             // Enable auto-accept
             ctx.reply(t('autoaccept.enabling'));
             const result = await autoaccept.enable(CDP_PORT);
+            let responseText = '';
             if (result.injected > 0) {
-                ctx.reply(t('autoaccept.enabled', { injected: result.injected }));
+                responseText = t('autoaccept.enabled', { injected: result.injected });
             } else {
-                ctx.reply(t('autoaccept.enabled_none'));
+                responseText = t('autoaccept.enabled_none');
             }
+            // If toggled via button click, refresh menu
+            if (subCommand === '') await sendMainMenu(ctx, responseText);
+            else ctx.reply(responseText);
         } else if (subCommand === 'off' || (subCommand === '' && autoaccept.isEnabled)) {
             // Disable auto-accept
             ctx.reply(t('autoaccept.disabling'));
             const result = await autoaccept.disable(CDP_PORT);
-            ctx.reply(t('autoaccept.disabled', { clicks: result.totalClicks }));
+            const responseText = t('autoaccept.disabled', { clicks: result.totalClicks });
+            // If toggled via button click, refresh menu
+            if (subCommand === '') await sendMainMenu(ctx, responseText);
+            else ctx.reply(responseText);
         } else if (subCommand === 'status') {
             // Show status
             const status = await autoaccept.getStatus(CDP_PORT);
@@ -771,17 +813,20 @@ bot.command('autoaccept', async (ctx) => {
     } catch (e) {
         ctx.reply(t('autoaccept.error', { error: e.message }));
     }
-});
+};
+
+bot.command('autoaccept', handleAutoAccept);
+bot.hears(/^(⚡|🔴)/i, handleAutoAccept);
 
 bot.action('aa_on', async (ctx) => {
     try {
         ctx.answerCbQuery('Enabling...');
         const result = await autoaccept.enable(CDP_PORT);
         if (result.injected > 0) {
-            ctx.reply(t('autoaccept.enabled', { injected: result.injected }));
-        } else {
-            ctx.reply(t('autoaccept.enabled_none'));
         }
+        
+        // Refresh the keyboard menu to update the button icon
+        await sendMainMenu(ctx, t('autoaccept.enabled', { injected: result.injected }));
     } catch (e) {
         ctx.reply(t('autoaccept.error', { error: e.message }));
     }
@@ -791,7 +836,9 @@ bot.action('aa_off', async (ctx) => {
     try {
         ctx.answerCbQuery('Disabling...');
         const result = await autoaccept.disable(CDP_PORT);
-        ctx.reply(t('autoaccept.disabled', { clicks: result.totalClicks }));
+        
+        // Refresh the keyboard menu to update the button icon
+        await sendMainMenu(ctx, t('autoaccept.disabled', { clicks: result.totalClicks }));
     } catch (e) {
         ctx.reply(t('autoaccept.error', { error: e.message }));
     }
@@ -921,17 +968,29 @@ bot.command('lang', async (ctx) => {
     parts.shift();
     const newLang = parts.join(' ').trim().toLowerCase();
     
-    if (newLang && ['en', 'tr'].includes(newLang)) {
+    const availableLangs = fs.readdirSync(path.join(__dirname, '..', 'locales'))
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
+
+    if (newLang && availableLangs.includes(newLang)) {
         loadLocale(newLang);
         await clearAllMenuScopes();
         await setMenuOnAllScopes();
-        return ctx.reply(t('lang.changed', { lang: newLang }));
+        await sendMainMenu(ctx, t('lang.changed', { lang: newLang }));
+        return;
     }
     
-    const buttons = [
-        [{ text: '🇬🇧 English', callback_data: 'lang_en' }],
-        [{ text: '🇹🇷 Türkçe', callback_data: 'lang_tr' }]
-    ];
+    const langMap = {
+        'en': '🇬🇧 English',
+        'tr': '🇹🇷 Türkçe',
+        'es': '🇪🇸 Español',
+        'fr': '🇫🇷 Français',
+        'de': '🇩🇪 Deutsch'
+    };
+    
+    const buttons = availableLangs.map(l => {
+        return [{ text: langMap[l] || l.toUpperCase(), callback_data: `lang_${l}` }];
+    });
     
     ctx.reply(t('lang.select_prompt'), {
         reply_markup: { inline_keyboard: buttons }
@@ -944,7 +1003,7 @@ bot.action(/lang_(.+)/, async (ctx) => {
     await clearAllMenuScopes();
     await setMenuOnAllScopes();
     ctx.answerCbQuery(t('lang.changed', { lang: newLang }));
-    ctx.reply(t('lang.changed', { lang: newLang }));
+    await sendMainMenu(ctx, t('lang.changed', { lang: newLang }));
 });
 
 
@@ -1265,7 +1324,9 @@ async function clearAllMenuScopes() {
  * We register menus for all available languages ('en', 'tr') plus the default.
  */
 async function setMenuOnAllScopes() {
-    const langs = ['en', 'tr'];
+    const langs = fs.readdirSync(path.join(__dirname, '..', 'locales'))
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
     const defaultLang = process.env.LANGUAGE || 'en';
     const originalLang = getLang(); // Save the user's active language
 
@@ -1287,14 +1348,11 @@ async function setMenuOnAllScopes() {
         await bot.telegram.callApi('setMyCommands', paramsDefault).catch(()=>{});
         await bot.telegram.callApi('setMyCommands', paramsPrivate).catch(()=>{});
 
-        if (ALLOWED_CHAT_ID) {
+        if (ALLOWED_CHAT_ID && langCode === originalLang) {
             const paramsChat = { 
                 commands: cmds, 
                 scope: { type: 'chat', chat_id: parseInt(ALLOWED_CHAT_ID) } 
             };
-            if (langCode !== defaultLang) {
-                paramsChat.language_code = langCode;
-            }
             await bot.telegram.callApi('setMyCommands', paramsChat).catch(()=>{});
         }
     };
@@ -1539,6 +1597,11 @@ async function init() {
     bot.launch({ dropPendingUpdates: true }).catch(err => {
         console.error("Bot launch failed:", err);
     });
+
+    // Push the main menu keyboard to the user so it's active by default (wait 3s to let IDE/CDP initialize)
+    setTimeout(() => {
+        pushMainMenuToUser().catch(console.error);
+    }, 3000);
 
     // Start periodic update checker (notifies via Telegram when update is available)
     updater.startUpdateChecker(bot, ALLOWED_CHAT_ID);

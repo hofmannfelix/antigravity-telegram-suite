@@ -124,7 +124,13 @@
         "close_window_desc": "Cerrar ventana actual",
         "agents_desc": "Listar y cambiar hilos de chat recientes",
         "artifacts_desc": "Listar artefactos del hilo actual",
-        "window_desc": "Seleccionar ventana IDE"
+        "window_desc": "Seleccionar ventana IDE",
+        "restart_desc": "Reiniciar el bot",
+        "btn_screenshot": "📸 Captura",
+        "btn_artifacts": "📦 Artefactos",
+        "btn_auto_on": "⚡ Auto",
+        "btn_auto_off": "🔴 Auto",
+        "btn_latest": "💬 Último"
     },
     "photo": {
         "downloaded": "✅ Archivo descargado y reenviando al agente...",

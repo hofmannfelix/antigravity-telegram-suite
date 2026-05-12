@@ -128,7 +128,12 @@
     "version_desc": "Show current version",
     "menu_desc": "Update the command menu",
     "window_desc": "Select IDE window",
-    "restart_desc": "Restart the bot"
+    "restart_desc": "Restart the bot",
+    "btn_screenshot": "📸 Screen",
+    "btn_artifacts": "📦 Artifacts",
+    "btn_auto_on": "⚡ Auto",
+    "btn_auto_off": "🔴 Auto",
+    "btn_latest": "💬 Latest"
   },
   "photo": {
     "downloaded": "✅ File downloaded and forwarding to agent...",
