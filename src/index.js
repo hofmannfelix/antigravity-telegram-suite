@@ -56,8 +56,26 @@ function saveMessageTargetMap(map) {
 }
 const messageTargetMap = loadMessageTargetMap();
 
+const LANG_STATE_FILE = path.join(os.homedir(), '.gemini', 'antigravity', 'lang.txt');
+
+function loadSavedLang() {
+    try {
+        if (fs.existsSync(LANG_STATE_FILE)) {
+            const saved = fs.readFileSync(LANG_STATE_FILE, 'utf-8').trim();
+            if (saved) return saved;
+        }
+    } catch (e) {}
+    return process.env.LANGUAGE || 'en';
+}
+
+function saveLangState(langCode) {
+    try {
+        fs.writeFileSync(LANG_STATE_FILE, langCode);
+    } catch (e) {}
+}
+
 // Load configured language
-const lang = process.env.LANGUAGE || 'en';
+const lang = loadSavedLang();
 loadLocale(lang);
 
 // ===== SECURITY: ALLOWED_CHAT_ID is mandatory =====
@@ -1023,6 +1041,7 @@ bot.command('lang', async (ctx) => {
 
     if (newLang && availableLangs.includes(newLang)) {
         loadLocale(newLang);
+        saveLangState(newLang);
         await clearAllMenuScopes();
         await setMenuOnAllScopes();
         await sendMainMenu(ctx, t('lang.changed', { lang: newLang }));
@@ -1049,6 +1068,7 @@ bot.command('lang', async (ctx) => {
 bot.action(/lang_(.+)/, async (ctx) => {
     const newLang = ctx.match[1];
     loadLocale(newLang);
+    saveLangState(newLang);
     await clearAllMenuScopes();
     await setMenuOnAllScopes();
     ctx.answerCbQuery(t('lang.changed', { lang: newLang }));
