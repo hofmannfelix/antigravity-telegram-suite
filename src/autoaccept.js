@@ -72,7 +72,7 @@ function buildObserverScript() {
     window.__AA_BOT_OBSERVER_ACTIVE = true;
 
     function isAgentPanel() {
-        return !!(document.querySelector('.react-app-container') ||
+        return !!(document.querySelector('#conversation, #chat, .interactive-session, .react-app-container') ||
             document.querySelector('[class*="agent"]') ||
             document.querySelector('[data-vscode-context]') ||
             document.querySelector('.monaco-workbench') ||
@@ -345,7 +345,7 @@ async function checkObserverStatus(port) {
                         paused: !!window.__AA_BOT_PAUSED,
                         clicks: window.__AA_BOT_CLICK_COUNT || 0,
                         clickLog: (window.__AA_BOT_CLICK_LOG || []).slice(-5),
-                        hasAgentPanel: !!(document.querySelector('.react-app-container') || document.querySelector('[class*="agent"]'))
+                        hasAgentPanel: !!(document.querySelector('#conversation, #chat, .interactive-session, .react-app-container') || document.querySelector('[class*="agent"]'))
                     };
                 })()
             `);
