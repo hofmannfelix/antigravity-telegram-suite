@@ -15,7 +15,7 @@
     "ide_title": "🛠️ <i>Sistem Kontrolleri:</i>",
     "ide_text": "- /start_ide → IDE/Agent kapalıysa başlatır\n- /close → Uygulamayı tamamen kapatır\n- /app → IDE ve Agent arasında geçiş yapar\n- /workspace → Projeyi değiştirir\n- /window → Aktif pencereyi seçer\n- /fix_shortcuts → Masaüstü kısayollarını onarır\n- /lang → Dil değiştirir\n- /menu → Menüyü yeniler\n- /cmd &lt;komut&gt; → Terminalde komut çalıştırır",
     "chat_title": "💬 <i>Sohbet Kontrolleri:</i>",
-    "chat_text": "- /new → Yeni sohbet açar\n- /agents → Son sohbetleri listeler\n- /artifacts → Artifact'leri listeler\n- /model → Kullanılacak modeli seçer\n- /autoaccept → Otomatik onay modunu açar/kapatır\n- /help → Bu yardım mesajını gösterir"
+    "chat_text": "- /new → Yeni sohbet açar\n- /agents → Son sohbetleri listeler\n- /artifacts → Artifact'leri listeler\n- /model → Kullanılacak modeli seçer\n- /autoaccept → Otomatik onay modunu açar/kapatır\n- /pushartifacts → Otomatik artifact gönderimini aç/kapat\n- /help → Bu yardım mesajını gösterir"
   },
   "ide": {
     "already_running": "✅ Antigravity IDE zaten çalışıyor! Ekstra pencere açmaya gerek yok.\n💡 Kapatmak için /close yazabilirsiniz.",
@@ -126,6 +126,7 @@
     "file_desc": "Dosya gezgini",
     "stop_desc": "Ajanı durdur",
     "autoaccept_desc": "Otomatik kabul aç/kapat",
+    "pushartifacts_desc": "Otomatik artifact gönderimini aç/kapat",
     "quota_desc": "Kota durumunu gösterir",
     "update_desc": "Güncellemeleri kontrol et",
     "version_desc": "Mevcut sürümü gösterir",
@@ -280,5 +281,9 @@
     "you_said": "Dediğiniz:",
     "empty": "Ses anlaşılamadı. Lütfen daha net konuşun.",
     "error": "Dönüştürme hatası: "
+  },
+  "pushartifacts": {
+    "enabled": "✅ Otomatik Artifact Gönderimi AKTİF!\n\nYeni resim ve videolar oluşturuldukça Telegram'a iletilecek.",
+    "disabled": "⏸️ Otomatik Artifact Gönderimi KAPALI."
   }
 }

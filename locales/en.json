@@ -15,7 +15,7 @@
     "ide_title": "🛠️ <i>System Controls:</i>",
     "ide_text": "- /start_ide → Start IDE/Agent if closed\n- /close → Fully close the app\n- /app → Switch between IDE and Agent\n- /workspace → Switch project\n- /window → Select active window\n- /fix_shortcuts → Fix desktop shortcuts\n- /lang → Switch language\n- /menu → Refresh menu\n- /cmd &lt;command&gt; → Run a terminal command",
     "chat_title": "💬 <i>Chat Controls:</i>",
-    "chat_text": "- /new → Open a new chat\n- /agents → List recent chats\n- /artifacts → List artifacts\n- /model → Select model to use\n- /autoaccept → Toggle auto-accept\n- /help → Show this help message"
+    "chat_text": "- /new → Open a new chat\n- /agents → List recent chats\n- /artifacts → List artifacts\n- /model → Select model to use\n- /autoaccept → Toggle auto-accept\n- /pushartifacts → Toggle automatic artifact push\n- /help → Show this help message"
   },
   "ide": {
     "already_running": "✅ Antigravity IDE is already running! No need to open another window.\n💡 Use /close to shut it down.",
@@ -126,6 +126,7 @@
     "file_desc": "Browse and send files",
     "stop_desc": "Stop the agent",
     "autoaccept_desc": "Toggle auto-accept on/off",
+    "pushartifacts_desc": "Toggle automatic artifact push",
     "quota_desc": "Shows Antigravity quota usage",
     "update_desc": "Check for updates",
     "version_desc": "Show current version",
@@ -280,5 +281,9 @@
     "you_said": "You said:",
     "empty": "Could not understand the audio. Please speak more clearly.",
     "error": "Transcription error: "
+  },
+  "pushartifacts": {
+    "enabled": "✅ Automatic Artifact Push ENABLED!\n\nNew images and videos will be pushed to Telegram as they are created.",
+    "disabled": "⏸️ Automatic Artifact Push DISABLED."
   }
 }
