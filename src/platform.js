@@ -240,7 +240,7 @@ function launchIDE(workspace, port = 9333) {
             return reject(new Error('IDE_NOT_INSTALLED'));
         }
 
-        const executeCmd = (isRunning) => {
+        const executeCmd = async (isRunning) => {
             let cmd;
             // --new-window ensures the IDE opens a fresh window for the workspace
             // instead of restoring the previous session
@@ -280,9 +280,10 @@ function launchIDE(workspace, port = 9333) {
 
             console.log(`[platform] launchIDE cmd: ${cmd}`);
 
-            // Strip VSCODE_* and WAYLAND env vars to avoid conflicts.
+            // Strip VSCODE_* and WAYLAND/GDK env vars to avoid conflicts.
             // PM2 inherits stale VSCODE_* from the IDE terminal, and
-            // WAYLAND_DISPLAY can cause crashes if Wayland was disabled.
+            // WAYLAND_DISPLAY / GDK_BACKEND=wayland can cause crashes
+            // if Wayland was disabled or stripped.
             const cleanEnv = { ...process.env };
             delete cleanEnv.VSCODE_IPC_HOOK;
             delete cleanEnv.VSCODE_IPC_HOOK_CLI;
@@ -291,6 +292,7 @@ function launchIDE(workspace, port = 9333) {
             delete cleanEnv.VSCODE_NLS_CONFIG;
             delete cleanEnv.VSCODE_CODE_CACHE_PATH;
             delete cleanEnv.WAYLAND_DISPLAY;
+            delete cleanEnv.GDK_BACKEND;
 
             if (isRunning && PLATFORM === 'linux') {
                 const { execSync } = require('child_process');
@@ -302,13 +304,59 @@ function launchIDE(workspace, port = 9333) {
                         cleanEnv.VSCODE_IPC_HOOK = activeSocket;
                     }
                     
+                    // Snapshot existing CDP targets BEFORE IPC call
+                    let targetsBefore = [];
+                    try {
+                        const raw = execSync(`curl -s http://127.0.0.1:${port}/json/list 2>/dev/null`, { encoding: 'utf8', timeout: 3000 });
+                        targetsBefore = JSON.parse(raw).filter(t => t.type === 'page').map(t => t.id);
+                    } catch (_) {}
+
                     // Use execSync for cli.js IPC call — must complete synchronously
                     execSync(cmd, { env: cleanEnv, timeout: 15000, stdio: 'pipe' });
                     console.log('[platform] launchIDE execSync completed successfully');
+                    
+                    // Verify the new window actually appeared via CDP
+                    if (workspace && targetsBefore.length > 0) {
+                        const wsName = require('path').basename(workspace).toLowerCase();
+                        let verified = false;
+                        for (let i = 0; i < 10; i++) {
+                            await new Promise(r => setTimeout(r, 1500));
+                            try {
+                                const raw = execSync(`curl -s http://127.0.0.1:${port}/json/list 2>/dev/null`, { encoding: 'utf8', timeout: 3000 });
+                                const pages = JSON.parse(raw).filter(t => t.type === 'page');
+                                const newTarget = pages.find(t => !targetsBefore.includes(t.id) || t.title.toLowerCase().includes(wsName));
+                                if (newTarget) {
+                                    console.log(`[platform] launchIDE verified: new window "${newTarget.title}" appeared`);
+                                    verified = true;
+                                    break;
+                                }
+                            } catch (_) {}
+                        }
+                        if (!verified) {
+                            console.warn('[platform] launchIDE: IPC succeeded but no new window detected — falling back to raw binary');
+                            const fallbackCmd = `nohup "${binary}" --remote-debugging-port=${port} --new-window --disable-workspace-trust "${workspace}" > /dev/null 2>&1 &`;
+                            console.log(`[platform] launchIDE fallback cmd: ${fallbackCmd}`);
+                            exec(fallbackCmd, { env: cleanEnv });
+                            // Wait for the window to appear
+                            await new Promise(r => setTimeout(r, 5000));
+                        }
+                    }
                     resolve();
                 } catch (err) {
                     console.error(`[platform] launchIDE execSync error: ${err.message}`);
-                    reject(err);
+                    // Fallback: try raw binary launch on IPC failure
+                    console.warn('[platform] launchIDE: IPC failed — falling back to raw binary');
+                    const fallbackCmd = `nohup "${binary}" --remote-debugging-port=${port} --new-window --disable-workspace-trust "${workspace || ''}" > /dev/null 2>&1 &`;
+                    console.log(`[platform] launchIDE fallback cmd: ${fallbackCmd}`);
+                    exec(fallbackCmd, { env: cleanEnv }, (fallbackErr) => {
+                        if (fallbackErr) {
+                            console.error(`[platform] launchIDE fallback also failed: ${fallbackErr.message}`);
+                            reject(err); // reject with original error
+                        } else {
+                            console.log('[platform] launchIDE fallback exec completed');
+                            resolve();
+                        }
+                    });
                 }
             } else {
                 exec(cmd, { env: cleanEnv }, (err) => {

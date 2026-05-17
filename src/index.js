@@ -1683,9 +1683,25 @@ async function init() {
         console.error(`[Bot Error] for ${ctx.updateType}:`, err.message || err);
     });
 
-    bot.launch({ dropPendingUpdates: true }).catch(err => {
-        console.error("Bot launch failed:", err);
-    });
+    // Retry bot.launch() with exponential backoff on transient failures (DNS, network)
+    const MAX_LAUNCH_RETRIES = 10;
+    async function launchWithRetry(attempt = 1) {
+        try {
+            await bot.launch({ dropPendingUpdates: true });
+            if (attempt > 1) console.log(`[launch] Polling started successfully on attempt ${attempt}`);
+        } catch (err) {
+            console.error(`[launch] Attempt ${attempt}/${MAX_LAUNCH_RETRIES} failed:`, err.message || err);
+            if (attempt < MAX_LAUNCH_RETRIES) {
+                const delay = Math.min(5000 * Math.pow(2, attempt - 1), 60000); // 5s, 10s, 20s, ... max 60s
+                console.log(`[launch] Retrying in ${delay / 1000}s...`);
+                setTimeout(() => launchWithRetry(attempt + 1), delay);
+            } else {
+                console.error(`[launch] All ${MAX_LAUNCH_RETRIES} attempts exhausted. Exiting for PM2 restart.`);
+                process.exit(1);
+            }
+        }
+    }
+    launchWithRetry();
 
     // Push the main menu keyboard to the user so it's active by default (wait 3s to let IDE/CDP initialize)
     setTimeout(() => {
@@ -1699,5 +1715,5 @@ async function init() {
 init();
 
 // Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => { try { bot.stop('SIGINT'); } catch(_) {} });
+process.once('SIGTERM', () => { try { bot.stop('SIGTERM'); } catch(_) {} });
