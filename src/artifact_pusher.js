@@ -66,6 +66,9 @@ function startArtifactPusher(bot, chatId) {
                     const stats = fs.statSync(fullPath);
                     if (stats.isDirectory()) continue;
                     
+                    // Ignore user-uploaded media from the IDE
+                    if (file.startsWith('media__')) continue;
+                    
                     // Only push images and videos
                     const ext = path.extname(file).toLowerCase();
                     const isMedia = ['.png', '.jpg', '.jpeg', '.mp4', '.mov'].includes(ext);
