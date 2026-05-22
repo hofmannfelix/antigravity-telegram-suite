@@ -28,7 +28,9 @@
     "window_closed": "✅ Window closed successfully.",
     "window_close_failed": "❌ Failed to close window. Is there an open window?",
     "closed": "✅ IDE fully closed! (All processes and lock files cleaned)",
-    "not_installed": "❌ Antigravity IDE not found. Please install it first.\nSee: https://antigravity.google/"
+    "not_installed": "❌ Antigravity IDE not found. Please install it first.\nSee: https://antigravity.google/",
+    "already_running_short": "✅ Antigravity IDE is already running!",
+    "running_no_cdp": "⚠️ Antigravity IDE is running, but the remote debugging port is not active.\n\n💡 Please close the IDE and run /start_ide again."
   },
   "status": {
     "title": "📊 <b>System Status:</b>\n",
@@ -248,7 +250,8 @@
     "start_failed": "❌ Start error: {error}",
     "already_closed": "ℹ️ Antigravity Standalone is already closed.",
     "closing": "🔌 Closing Antigravity Standalone...",
-    "closed": "✅ Antigravity Standalone closed."
+    "closed": "✅ Antigravity Standalone closed.",
+    "running_no_cdp": "⚠️ Antigravity Standalone is running, but the remote debugging port is not active.\n\n💡 Please close the agent and run /start_ag again."
   },
   "close": {
     "select_prompt": "⚠️ Please specify which app to close:\n\n👉 Standalone: /close_ag\n👉 IDE (Classic): /close_ide"

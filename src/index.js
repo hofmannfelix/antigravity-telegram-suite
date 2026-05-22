@@ -6,7 +6,7 @@ const os = require('os');
 const { exec } = require('child_process');
 const { loadLocale, t, getLang } = require('./i18n');
 const { config, isIDERunning, killIDE, cleanLockFile, launchIDE, trustWorkspaceViaCDP, PLATFORM } = require('./platform');
-const { isAgentWorking, getFullLatestResponse, snapshotChatState, captureAgentScreenshot, captureFullIDEScreenshot, waitForAgentResponse, sendViaCDP, triggerNewChat, triggerModelMenu, getAvailableModels, selectModel, getCurrentModel, stopAgent, getQuota, listWindows, setPreferredWindow, getPreferredWindow, getPreferredTargetId, getCachedWindows, closeWindow, listAgentThreads, switchAgentThread, getActiveThreadId, getActiveThreadInfo, setActiveWorkspace, switchStandaloneWorkspace } = require('./cdp_controller');
+const { isCDPActive, isAgentWorking, getFullLatestResponse, snapshotChatState, captureAgentScreenshot, captureFullIDEScreenshot, waitForAgentResponse, sendViaCDP, triggerNewChat, triggerModelMenu, getAvailableModels, selectModel, getCurrentModel, stopAgent, getQuota, listWindows, setPreferredWindow, getPreferredWindow, getPreferredTargetId, getCachedWindows, closeWindow, listAgentThreads, switchAgentThread, getActiveThreadId, getActiveThreadInfo, setActiveWorkspace, switchStandaloneWorkspace } = require('./cdp_controller');
 const autoaccept = require('./autoaccept');
 const updater = require('./updater');
 const { runTurboOrchestration } = require('./turbo_orchestrator');
@@ -348,7 +348,12 @@ ${t('help.chat_text')}
 bot.command('start_ide', async (ctx) => {
     const app = 'ide';
     const running = await isIDERunning(app);
+    const appPort = getCDPPort(app);
     if (running) {
+        const cdpActive = await isCDPActive(appPort);
+        if (!cdpActive) {
+            return ctx.reply(t('ide.running_no_cdp'));
+        }
         return ctx.reply(t('ide.already_running_short'));
     }
     cleanLockFile(app);
@@ -374,7 +379,12 @@ bot.command('start_ide', async (ctx) => {
 bot.command('start_ag', async (ctx) => {
     const app = 'agent';
     const running = await isIDERunning(app);
+    const appPort = getCDPPort(app);
     if (running) {
+        const cdpActive = await isCDPActive(appPort);
+        if (!cdpActive) {
+            return ctx.reply(t('standalone.running_no_cdp'));
+        }
         return ctx.reply(t('standalone.already_running'));
     }
     cleanLockFile(app);

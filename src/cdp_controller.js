@@ -1485,7 +1485,18 @@ async function switchStandaloneWorkspace(port, wsName) {
     return false;
 }
 
+async function isCDPActive(port) {
+    try {
+        const raw = await httpGet(`http://127.0.0.1:${port}/json`, 2000);
+        JSON.parse(raw);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 module.exports = {
+    isCDPActive,
     findConversationIdByTitle,
     isAgentWorking,
     getFullLatestResponse,
